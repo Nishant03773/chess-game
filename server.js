@@ -5,17 +5,15 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { 
-    cors: { origin: "*" } 
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
-// Explicitly define the absolute path to the current directory
-const publicPath = path.join(__dirname, '');
+// Explicitly define the path to the public folder
+const publicPath = path.join(__dirname, 'public');
 
-// 1. Serve static files from the root
+// 1. Serve static files from the public folder
 app.use(express.static(publicPath));
 
-// 2. Explicitly serve index.html for the home page with an absolute path
+// 2. Explicitly serve index.html for the root URL
 app.get('/', (req, res) => {
     res.sendFile(path.join(publicPath, 'index.html'));
 });
@@ -43,11 +41,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('move', ({ roomId, moveData }) => {
-        socket.to(roomId.toUpperCase()).emit('remote-move', moveData);
+        if(roomId) socket.to(roomId.toUpperCase()).emit('remote-move', moveData);
     });
 
     socket.on('chat', ({ roomId, msg }) => {
-        socket.to(roomId.toUpperCase()).emit('remote-chat', msg);
+        if(roomId) socket.to(roomId.toUpperCase()).emit('remote-chat', msg);
     });
 });
 
