@@ -9,15 +9,15 @@ const io = new Server(server, {
     cors: { origin: "*" } 
 });
 
-// Use path.resolve to get the absolute path of the root folder
-const root = path.resolve(__dirname);
+// Explicitly define the absolute path to the current directory
+const publicPath = path.join(__dirname, '');
 
 // 1. Serve static files from the root
-app.use(express.static(root));
+app.use(express.static(publicPath));
 
-// 2. Explicitly serve index.html for the home page
+// 2. Explicitly serve index.html for the home page with an absolute path
 app.get('/', (req, res) => {
-    res.sendFile(path.join(root, 'index.html'));
+    res.sendFile(path.join(publicPath, 'index.html'));
 });
 
 const rooms = {};
