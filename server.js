@@ -5,14 +5,19 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, { 
+    cors: { origin: "*" } 
+});
 
-// Serve static files from the CURRENT directory
-app.use(express.static(__dirname));
+// Use path.resolve to get the absolute path of the root folder
+const root = path.resolve(__dirname);
 
-// Manually point the root URL to index.html
+// 1. Serve static files from the root
+app.use(express.static(root));
+
+// 2. Explicitly serve index.html for the home page
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(root, 'index.html'));
 });
 
 const rooms = {};
@@ -27,12 +32,11 @@ io.on('connection', (socket) => {
 
     socket.on('join-room', ({ roomId, name }) => {
         const id = roomId.toUpperCase();
-        const room = rooms[id];
-        if (room && room.players.length === 1) {
-            room.players.push({ id: socket.id, name, color: 'black' });
+        if (rooms[id] && rooms[id].players.length === 1) {
+            rooms[id].players.push({ id: socket.id, name, color: 'black' });
             socket.join(id);
-            io.to(room.players[0].id).emit('start-game', { opponent: name, color: 'white' });
-            io.to(socket.id).emit('start-game', { opponent: room.players[0].name, color: 'black' });
+            io.to(rooms[id].players[0].id).emit('start-game', { opponent: name, color: 'white' });
+            io.to(socket.id).emit('start-game', { opponent: rooms[id].players[0].name, color: 'black' });
         } else {
             socket.emit('error-msg', 'Room not found or full');
         }
