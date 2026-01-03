@@ -7,9 +7,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// Serve files from the main folder
+// Serve static files from the CURRENT directory
 app.use(express.static(__dirname));
 
+// Manually point the root URL to index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -17,8 +18,6 @@ app.get('/', (req, res) => {
 const rooms = {};
 
 io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
-
     socket.on('create-room', (name) => {
         const roomId = Math.random().toString(36).substring(2, 7).toUpperCase();
         rooms[roomId] = { players: [{ id: socket.id, name, color: 'white' }] };
@@ -27,10 +26,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('join-room', ({ roomId, name }) => {
-        const room = rooms[roomId.toUpperCase()];
+        const id = roomId.toUpperCase();
+        const room = rooms[id];
         if (room && room.players.length === 1) {
             room.players.push({ id: socket.id, name, color: 'black' });
-            socket.join(roomId.toUpperCase());
+            socket.join(id);
             io.to(room.players[0].id).emit('start-game', { opponent: name, color: 'white' });
             io.to(socket.id).emit('start-game', { opponent: room.players[0].name, color: 'black' });
         } else {
