@@ -245,7 +245,7 @@
     }
     function play(k) { if (audioCtx && buffers[k]) { const s = audioCtx.createBufferSource(); s.buffer = buffers[k]; s.connect(audioCtx.destination); s.start(0); } }
 
-    // --- REPLACED P2P WITH WEBSOCKET LOGIC ---
+    // --- WEBSOCKET LOGIC ---
     window.showOnlineLobby = () => { 
         document.getElementById('welcome-screen').style.display='none'; 
         document.getElementById('online-lobby-screen').style.display='flex'; 
@@ -267,7 +267,6 @@
         socket.emit('join-room', { roomId: targetId, name: name });
     };
 
-    // WebSocket Listeners
     socket.on('room-created', (id) => {
         currentRoomId = id;
         document.getElementById('my-p2p-id').innerText = id;
@@ -289,7 +288,7 @@
     socket.on('remote-chat', (msg) => addChatMsg(msg, 'them'));
     socket.on('error-msg', (msg) => alert(msg));
 
-    // --- GAME LOGIC (UNCHANGED) ---
+    // --- UI & CHAT LOGIC ---
     window.copyToClipboard = () => {
         const idText = document.getElementById('my-p2p-id').innerText;
         navigator.clipboard.writeText(idText).then(() => {
@@ -323,7 +322,73 @@
         box.scrollTop = box.scrollHeight;
     }
 
-    // --- ENGINE CORE (PRESERVED) ---
+    // --- AI LOGIC (MINIMAX) ---
+    function evaluateBoard(b) {
+        let score = 0;
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                if (b[r][c]) score += PIECE_VALUES[b[r][c].type] * (b[r][c].color === 'black' ? 1 : -1);
+            }
+        }
+        return score;
+    }
+
+    function minimax(b, depth, alpha, beta, isMaximizing) {
+        if (depth === 0) return evaluateBoard(b);
+        const moves = [];
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                if (b[r][c]?.color === (isMaximizing ? 'black' : 'white')) {
+                    getLegalMoves(r, c, b).forEach(m => moves.push({fR: r, fC: c, tR: m.r, tC: m.c, type: m.type}));
+                }
+            }
+        }
+        if (isMaximizing) {
+            let maxEval = -Infinity;
+            for (let m of moves) {
+                const tempB = JSON.parse(JSON.stringify(b));
+                tempB[m.tR][m.tC] = tempB[m.fR][m.fC]; tempB[m.fR][m.fC] = null;
+                const ev = minimax(tempB, depth - 1, alpha, beta, false);
+                maxEval = Math.max(maxEval, ev); alpha = Math.max(alpha, ev);
+                if (beta <= alpha) break;
+            }
+            return maxEval;
+        } else {
+            let minEval = Infinity;
+            for (let m of moves) {
+                const tempB = JSON.parse(JSON.stringify(b));
+                tempB[m.tR][m.tC] = tempB[m.fR][m.fC]; tempB[m.fR][m.fC] = null;
+                const ev = minimax(tempB, depth - 1, alpha, beta, true);
+                minEval = Math.min(minEval, ev); beta = Math.min(beta, ev);
+                if (beta <= alpha) break;
+            }
+            return minEval;
+        }
+    }
+
+    function makeAI() {
+        let allMoves = [];
+        for (let r=0; r<8; r++) for (let c=0; c<8; c++) if (board[r][c]?.color === 'black') {
+            getLegalMoves(r,c,board).forEach(m => allMoves.push({fR: r, fC: c, tR: m.r, tC: m.c, type: m.type}));
+        }
+        if (allMoves.length === 0) return;
+
+        let selectedMove;
+        if (aiLevel === 3) {
+            let bestScore = -Infinity;
+            for (let m of allMoves) {
+                const tempB = JSON.parse(JSON.stringify(board));
+                tempB[m.tR][m.tC] = tempB[m.fR][m.fC]; tempB[m.fR][m.fC] = null;
+                const score = minimax(tempB, 2, -Infinity, Infinity, false);
+                if (score > bestScore) { bestScore = score; selectedMove = m; }
+            }
+        } else {
+            selectedMove = allMoves[Math.floor(Math.random() * allMoves.length)];
+        }
+        if (selectedMove) executeMove(selectedMove.fR, selectedMove.fC, selectedMove.tR, selectedMove.tC, selectedMove.type);
+    }
+
+    // --- ENGINE CORE ---
     window.showDifficulty = () => { document.getElementById('welcome-screen').style.display='none'; document.getElementById('difficulty-screen').style.display='flex'; };
     window.showPlayerNameInput = () => { document.getElementById('welcome-screen').style.display='none'; document.getElementById('player-names-screen').style.display='flex'; };
     
@@ -342,7 +407,7 @@
     };
 
     function executeMove(fR, fC, tR, tC, moveType, fromRemote = false) {
-        const piece = board[fR][fC]; const isCap = board[tR][tR] !== null || moveType === 'enPassant';
+        const piece = board[fR][fC]; const isCap = board[tR][tC] !== null || moveType === 'enPassant';
         if (isCap) { document.getElementById('board-wrapper').classList.add('shake'); setTimeout(()=>document.getElementById('board-wrapper').classList.remove('shake'), 300); if("vibrate" in navigator) navigator.vibrate(50); }
         if (moveType === 'enPassant') board[fR][tC] = null;
         if (moveType === 'castle') { const rc = tC === 6 ? 7 : 0, nrc = tC === 6 ? 5 : 3; board[tR][nrc] = board[tR][rc]; board[tR][rc] = null; }
@@ -351,7 +416,6 @@
         board[tR][tC] = piece; board[fR][fC] = null; piece.hasMoved = true;
         enPassantTarget = (piece.type === 'p' && Math.abs(tR - fR) === 2) ? {r: (fR + tR)/2, c: fC} : null;
         
-        // WebSocket Emission
         if (gameMode === 'P2P' && !fromRemote) {
             socket.emit('move', { roomId: currentRoomId, moveData: { fR, fC, tR, tC, mType: moveType } });
         }
@@ -360,9 +424,23 @@
         finalizeTurn(isCap);
     }
 
-    // ... Rest of your engine logic (initBoard, getLegalMoves, isCheck, etc.) stays exactly the same ...
-    // Note: Ensure all functions like getLegalMoves, render, finalizeTurn are included from your original script.
-    
+    function finalizeTurn(isCap) {
+        turn = turn === 'white' ? 'black' : 'white'; selected = null; legalMoves = [];
+        const check = isCheck(turn, board);
+        if (check && hasLegalMoves(turn)) { 
+            play('check'); 
+            const msg = document.getElementById('check-alert-msg'); 
+            msg.innerText = pNames[turn].toUpperCase() + " IS IN CHECK!"; 
+            msg.classList.add('show'); 
+            setTimeout(() => msg.classList.remove('show'), 2000); 
+        } else play(isCap ? 'capture' : 'move');
+
+        if (!hasLegalMoves(turn)) endGame(turn === 'white' ? 'black' : 'white', check ? "CHECKMATE" : "STALEMATE");
+        render();
+
+        if (gameActive && gameMode === 'AI' && turn === 'black') setTimeout(makeAI, 500);
+    }
+
     function startTimer() {
         timerInterval = setInterval(() => {
             if (!gameActive) return;
@@ -394,16 +472,6 @@
             executeMove(selected.r, selected.c, r, c, move.type); return;
         }
         if (board[r][c]?.color === turn) { selected = {r, c}; legalMoves = getLegalMoves(r, c, board); render(); }
-    }
-
-    function finalizeTurn(isCap) {
-        turn = turn === 'white' ? 'black' : 'white'; selected = null; legalMoves = [];
-        const check = isCheck(turn, board);
-        if (check && hasLegalMoves(turn)) { play('check'); const msg = document.getElementById('check-alert-msg'); msg.innerText = pNames[turn].toUpperCase() + " IS IN CHECK!"; msg.classList.add('show'); setTimeout(() => msg.classList.remove('show'), 2000); }
-        else play(isCap ? 'capture' : 'move');
-        if (!hasLegalMoves(turn)) endGame(turn === 'white' ? 'black' : 'white', check ? "CHECKMATE" : "STALEMATE");
-        render();
-        if (gameActive && gameMode === 'AI' && turn === 'black') setTimeout(makeAI, 500);
     }
 
     function showPromotion(r, c, isCap) {
@@ -497,8 +565,6 @@
         }
     }
     window.addEventListener('resize', render);
-    
-    // Initial Render to prevent blank screen
     render();
 })();
 </script>
