@@ -1,16 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProChess - Online</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        :root {
+            --bg-body: #1a1614; --bg-sidebar: #2b2420;
+            --board-light: #f0d9b5; --board-dark: #b58863;  
+            --accent: #dca355; --selected: rgba(119, 149, 86, 0.8);
+            --sq-size: 70px;
+        }
+        body { background-color: var(--bg-body); color: #ebecd0; margin: 0; font-family: "Segoe UI", sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+        
+        #welcome-screen, #online-lobby-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, #3d2b1f 0%, #1a1614 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; text-align: center; }
+        
+        .player-input { background: #2b2420; border: 1px solid var(--accent); color: white; padding: 12px; border-radius: 4px; width: 250px; text-align: center; margin: 10px 0; }
+        .mode-btn { background: #4a3728; color: #f0d9b5; border: 2px solid var(--accent); padding: 12px 24px; font-weight: bold; border-radius: 8px; cursor: pointer; margin: 8px; }
+
+        #game-container { display: none; flex-direction: row; gap: 20px; padding: 10px; background: #2b2420; border-radius: 8px; border: 1px solid #3d332d; }
+        #board-wrapper { position: relative; width: calc(var(--sq-size) * 8); height: calc(var(--sq-size) * 8); }
+        #board-grid { display: grid; grid-template-columns: repeat(8, var(--sq-size)); grid-template-rows: repeat(8, var(--sq-size)); }
+        
+        .sq { width: var(--sq-size); height: var(--sq-size); display: flex; justify-content: center; align-items: center; cursor: pointer; }
+        .l { background-color: var(--board-light); } .d { background-color: var(--board-dark); }
+        .sq.selected { background-color: var(--selected) !important; }
+
+        #piece-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .piece { width: var(--sq-size); height: var(--sq-size); position: absolute; display: flex; justify-content: center; align-items: center; font-size: calc(var(--sq-size) * 0.75); transition: transform 0.25s ease; }
+
+        .sidebar { width: 250px; display: flex; flex-direction: column; height: calc(var(--sq-size) * 8); }
+        .chat-container { flex-grow: 1; background: #212121; border-radius: 6px; border: 1px solid #3d332d; display: flex; flex-direction: column; overflow: hidden; }
+        #chat-msgs { flex-grow: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 5px; font-size: 0.85rem; }
+        .msg.me { align-self: flex-end; color: var(--accent); }
+        .msg.them { align-self: flex-start; color: #ddd; }
+        
+        @media (max-width: 850px) { :root { --sq-size: 44px; } #game-container { flex-direction: column; } }
+    </style>
+</head>
+<body>
+
+    <div id="welcome-screen">
+        <h1 style="color: var(--accent); font-size: 3rem;">PRO CHESS</h1>
+        <button class="mode-btn" onclick="showLobby()">MULTIPLAYER</button>
+    </div>
+
+    <div id="online-lobby-screen" style="display:none;">
+        <h2 style="color: var(--accent);">LOBBY</h2>
+        <input type="text" id="p-name" class="player-input" placeholder="Your Name">
+        <br>
+        <button class="mode-btn" onclick="createRoom()">HOST GAME</button>
+        <div style="margin:10px;">OR</div>
+        <input type="text" id="room-code" class="player-input" placeholder="Room Code">
+        <br>
+        <button class="mode-btn" onclick="joinRoom()">JOIN GAME</button>
+        <p id="status-msg" style="color:var(--accent); font-weight:bold;"></p>
+    </div>
+
+    <div id="game-container">
+        <div id="board-wrapper">
+            <div id="board-grid"></div>
+            <div id="piece-layer"></div>
+        </div>
+        <div class="sidebar">
+            <div class="chat-container">
+                <div id="chat-msgs"></div>
+                <input type="text" id="chat-inp" class="player-input" style="width:100%; margin:0; border:none;" placeholder="Chat..." onkeydown="if(event.key==='Enter') sendMsg()">
+            </div>
+        </div>
+    </div>
+
 <script>
-(function() {
-    // FIXED: Connects automatically to your Render URL
-    const socket = io(); 
+    // Ensure socket is initialized safely
+    const socket = io();
 
     const GLYPHS = { white: { k:'♔', q:'♕', r:'♖', b:'♗', n:'♘', p:'♙' }, black: { k:'♚', q:'♛', r:'♜', b:'♝', n:'♞', p:'♟' } };
-    
-    let board = [], turn = 'white', selected = null;
-    let myRole = null, activeRoom = null;
+    let board = [], turn = 'white', selected = null, myRole = null, activeRoom = null;
 
-    window.showLobby = () => { 
-        document.getElementById('welcome-screen').style.display='none'; 
-        document.getElementById('online-lobby-screen').style.display='flex'; 
+    // --- UI FUNCTIONS ---
+    window.showLobby = () => {
+        document.getElementById('welcome-screen').style.display = 'none';
+        document.getElementById('online-lobby-screen').style.display = 'flex';
     };
 
     window.createRoom = () => {
@@ -23,13 +94,14 @@
         const name = document.getElementById('p-name').value;
         const code = document.getElementById('room-code').value.toUpperCase();
         if(!name || !code) return alert("Enter Name & Code");
-        activeRoom = code; 
+        activeRoom = code;
         socket.emit('join-room', { roomId: code, name });
     };
 
+    // --- SOCKET LISTENERS ---
     socket.on('room-created', (id) => {
         activeRoom = id;
-        document.getElementById('status-msg').innerHTML = `CODE: <b>${id}</b><br>Waiting for opponent...`;
+        document.getElementById('status-msg').innerHTML = `CODE: <b style="font-size:1.5rem; color:white;">${id}</b><br>Waiting for opponent...`;
     });
 
     socket.on('start-game', ({ opponent, color }) => {
@@ -37,26 +109,20 @@
         document.getElementById('online-lobby-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
         initBoard();
-        appendChat(`Match started! Opponent: ${opponent}`, 'system');
+        appendChat(`Started! Opponent: ${opponent}`, 'system');
     });
 
-    socket.on('remote-move', (m) => {
-        executeMove(m.fR, m.fC, m.tR, m.tC, true);
-    });
-
+    socket.on('remote-move', (m) => executeMove(m.fR, m.fC, m.tR, m.tC, true));
     socket.on('remote-chat', (msg) => appendChat(msg, 'them'));
     socket.on('error-msg', (msg) => alert(msg));
 
+    // --- GAME ENGINE ---
     function initBoard() {
         const layout = [
-            ['r','n','b','q','k','b','n','r'],
-            ['p','p','p','p','p','p','p','p'],
-            [null,null,null,null,null,null,null,null],
-            [null,null,null,null,null,null,null,null],
-            [null,null,null,null,null,null,null,null],
-            [null,null,null,null,null,null,null,null],
-            ['P','P','P','P','P','P','P','P'],
-            ['R','N','B','Q','K','B','N','R']
+            ['r','n','b','q','k','b','n','r'],['p','p','p','p','p','p','p','p'],
+            [null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null],
+            [null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null],
+            ['P','P','P','P','P','P','P','P'],['R','N','B','Q','K','B','N','R']
         ];
         board = layout.map(row => row.map(c => c ? { type: c.toLowerCase(), color: c === c.toUpperCase() ? 'white' : 'black' } : null));
         
@@ -65,10 +131,10 @@
         for(let r=0; r<8; r++) {
             for(let c=0; c<8; c++) {
                 const sq = document.createElement('div');
-                sq.id = `sq-${r}-${c}`;
                 sq.className = `sq ${(r+c)%2===0 ? 'l' : 'd'}`;
+                sq.id = `sq-${r}-${c}`;
                 sq.onclick = () => {
-                    if (turn !== myRole) return; 
+                    if (turn !== myRole) return;
                     if (selected) {
                         if (selected.r === r && selected.c === c) { selected = null; }
                         else { executeMove(selected.r, selected.c, r, c); selected = null; }
@@ -86,19 +152,25 @@
     function executeMove(fR, fC, tR, tC, isRemote = false) {
         board[tR][tC] = board[fR][fC];
         board[fR][fC] = null;
-        if (!isRemote) {
-            socket.emit('move', { roomId: activeRoom, moveData: { fR, fC, tR, tC } });
-        }
+        if (!isRemote) socket.emit('move', { roomId: activeRoom, moveData: { fR, fC, tR, tC } });
         turn = (turn === 'white') ? 'black' : 'white';
         render();
     }
 
     function render() {
         document.querySelectorAll('.sq').forEach(s => s.classList.remove('selected'));
-        if (selected) document.getElementById(`sq-${selected.r}-${selected.c}`).classList.add('selected');
+        if (selected) {
+            const el = document.getElementById(`sq-${selected.r}-${selected.c}`);
+            if(el) el.classList.add('selected');
+        }
+        
         const layer = document.getElementById('piece-layer');
+        if(!layer) return;
         layer.innerHTML = '';
-        const sqSize = 70; // Matches CSS
+        
+        // Dynamic sqSize detection for mobile
+        const sqSize = document.querySelector('.sq')?.offsetWidth || 70;
+
         board.forEach((row, r) => row.forEach((p, c) => {
             if (p) {
                 const el = document.createElement('div');
@@ -119,11 +191,14 @@
     };
 
     function appendChat(msg, side) {
+        const box = document.getElementById('chat-msgs');
+        if(!box) return;
         const div = document.createElement('div');
         div.className = `msg ${side}`;
         div.innerText = msg;
-        document.getElementById('chat-msgs').appendChild(div);
-        document.getElementById('chat-msgs').scrollTop = document.getElementById('chat-msgs').scrollHeight;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
     }
-})();
 </script>
+</body>
+</html>
